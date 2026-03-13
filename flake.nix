@@ -29,6 +29,7 @@
             commandGroups = {
               "1-front-tools" = [
                 pkgs.nodejs_25
+                pkgs.pnpm
               ];
               "2-back-tools" = [
                 pkgs.uv
