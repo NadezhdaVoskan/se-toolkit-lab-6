@@ -310,7 +310,7 @@ def main():
             "type": "function",
             "function": {
                 "name": "read_file",
-                "description": "Read a file from the project repository",
+                "description": "Read the contents of a file from the project repository to inspect source code, documentation, or configuration",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -324,7 +324,7 @@ def main():
             "type": "function",
             "function": {
                 "name": "list_files",
-                "description": "List files and directories at given path",
+                "description": "List files and directories at a given path to discover repository structure, modules, or components",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -364,6 +364,17 @@ IMPORTANT:
 - Do NOT narrate your process (no 'I need to check', 'let me look', 'I will inspect', etc.).
 - Do NOT describe tool usage or planning steps in the final output.
 - Use tools silently and only return final answers once you have evidence.
+
+For questions about modules, routers, files, components, or backend structure:
+- First use `list_files` on the relevant directory to discover what exists.
+- Then use `read_file` on the relevant files to gather details.
+- Only then provide the final answer based on the evidence.
+
+For API router questions specifically:
+- Inspect the backend routers directory using `list_files`.
+- Identify each router module.
+- Read each file to determine the domain it handles.
+- Do not answer "not found" unless you have actually inspected the relevant directories.
 
 When you have enough information, respond in strict JSON with these keys:
 - `answer`: string (required)
