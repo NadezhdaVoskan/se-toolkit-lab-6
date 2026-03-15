@@ -154,14 +154,16 @@ Do not make up information. Use tools to verify facts."""
                 # Final answer
                 content = message.content
                 # Parse answer and source from content
-                # Assume LLM returns JSON
-                try:
-                    parsed = json.loads(content)
-                    answer = parsed.get("answer", content)
-                    source = parsed.get("source", "")
-                except:
-                    answer = content
-                    source = ""
+                answer = content
+                source = ""
+                if "answer:" in content.lower():
+                    # Try to extract structured response
+                    lines = content.split('\n')
+                    for line in lines:
+                        if line.lower().startswith("answer:"):
+                            answer = line.split(":", 1)[1].strip()
+                        elif line.lower().startswith("source:"):
+                            source = line.split(":", 1)[1].strip()
                 
                 output = {
                     "answer": answer,
