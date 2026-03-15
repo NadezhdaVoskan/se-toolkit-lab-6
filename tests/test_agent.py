@@ -15,3 +15,4 @@ def test_agent_output():
     assert "answer" in data
     assert "tool_calls" in data
     assert isinstance(data["tool_calls"], list)
+    assert len(data["answer"]) > 0  # Ensure answer is not empty
