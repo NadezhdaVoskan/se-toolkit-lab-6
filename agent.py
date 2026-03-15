@@ -9,7 +9,6 @@ import sys
 
 import httpx
 from dotenv import load_dotenv
-from openai import OpenAI
 
 # Project root for security
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -84,7 +83,85 @@ class MockLLM:
 def get_llm_client(api_key, api_base):
     if _is_mock_mode(api_base):
         return MockLLM()
+
+    try:
+        from openai import OpenAI
+    except ImportError as e:
+        raise RuntimeError(
+            "Missing dependency 'openai'. Install it to use the LLM client.\n"
+            "You can install it with: pip install openai"
+        ) from e
+
     return OpenAI(api_key=api_key, base_url=api_base)
+
+
+def _strip_code_fence(text: str) -> str:
+    if not isinstance(text, str):
+        return ""
+    t = text.strip()
+    if t.startswith("```") and t.endswith("```"):
+        # Remove leading/trailing fences and optional language spec
+        lines = t.splitlines()
+        if len(lines) >= 3:
+            return "\n".join(lines[1:-1]).strip()
+    return t
+
+
+def parse_final_response(content: str) -> dict:
+    """Parse the final assistant response into structured output.
+
+    The preference order is:
+    1) JSON (raw or inside code fences)
+    2) Heuristic parsing for Source: ...
+    3) Raw text as answer
+    """
+    result = {"answer": ""}
+
+    if content is None:
+        return result
+
+    text = _strip_code_fence(content)
+
+    # Try JSON parse
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            if "answer" in parsed:
+                result["answer"] = str(parsed.get("answer") or "")
+            else:
+                # If JSON has no answer key, treat entire JSON as answer
+                result["answer"] = text
+            if "source" in parsed and parsed.get("source"):
+                result["source"] = str(parsed.get("source"))
+            return result
+    except Exception:
+        pass
+
+    # Heuristic parse: look for lines like "source: ..." or "Source: ..."
+    source = None
+    answer_lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        lower = stripped.lower()
+        if lower.startswith("source:"):
+            source = stripped.split(":", 1)[1].strip()
+            continue
+        if lower.startswith("answer:"):
+            answer_lines.append(stripped.split(":", 1)[1].strip())
+            continue
+        answer_lines.append(stripped)
+
+    if answer_lines:
+        result["answer"] = "\n".join(answer_lines).strip()
+    else:
+        result["answer"] = text.strip()
+
+    if source:
+        result["source"] = source
+
+    return result
 
 
 def read_file(path):
@@ -250,17 +327,20 @@ def main():
     ]
 
     # System prompt
-    system_prompt = """You are a system assistant. Use the available tools to answer questions by gathering evidence from documentation, source code, and the running backend.
+    system_prompt = """You are a system assistant. Use repository evidence to answer questions by gathering information from documentation, source code, and the running backend.
 
 Tools:
-- `read_file` / `list_files` for documentation and source code lookup.
-- `query_api` for live system state and runtime data.
+- `list_files` to discover relevant files and directories in the repo (prefer before read_file when searching documentation).
+- `read_file` to read file contents (docs or source code).
+- `query_api` to query the live backend API for runtime system state.
 
-When you have enough information, provide a final answer with:
-- answer: Your response
-- source: Optional reference (e.g., wiki/git-workflow.md#resolving-merge-conflicts)
+When you have enough information, respond in strict JSON with these keys:
+- `answer`: string (required)
+- `source`: optional string (e.g., wiki/git-workflow.md#resolving-merge-conflicts or backend/app/main.py)
 
-Do not make up information. Use tools to verify facts."""
+Always produce valid JSON and nothing else on stdout. Never include explanatory text outside the JSON.
+
+Do not hallucinate; only answer based on tools and repo evidence."""
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -324,21 +404,35 @@ Do not make up information. Use tools to verify facts."""
                     elif line.lower().startswith("source:"):
                         source = line.split(":", 1)[1].strip()
 
+            parsed = parse_final_response(content)
             output = {
-                "answer": answer,
-                "source": source,
-                "tool_calls": tool_calls
+                "answer": parsed.get("answer", ""),
+                "tool_calls": tool_calls,
             }
-            print(json.dumps(output))
+
+            # If the model did not provide a source but we have file tool calls,
+            # infer the most likely source path.
+            if not parsed.get("source"):
+                for call in tool_calls:
+                    if call.get("tool") in ("read_file", "list_files"):
+                        args = call.get("args") or {}
+                        path = args.get("path")
+                        if isinstance(path, str) and path:
+                            output["source"] = path
+                            break
+            else:
+                output["source"] = parsed["source"]
+
+            # Always output strict JSON only.
+            print(json.dumps(output, ensure_ascii=False))
             return
 
         # Max calls reached
         output = {
             "answer": "Maximum tool calls reached without final answer",
-            "source": "",
-            "tool_calls": tool_calls
+            "tool_calls": tool_calls,
         }
-        print(json.dumps(output))
+        print(json.dumps(output, ensure_ascii=False))
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
