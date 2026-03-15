@@ -410,7 +410,7 @@ Do not hallucinate; only answer based on tools and repo evidence."""
             messages.append(assistant_message)
             
 
-            tool_calls_in_message = message.get('tool_calls') or []
+            tool_calls_in_message = assistant_tool_calls
             if tool_calls_in_message:
                 for tool_call in tool_calls_in_message:
                     tool_name = tool_call.function.name
