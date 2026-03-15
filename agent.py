@@ -42,11 +42,10 @@ class _MockResponse:
 
 
 class MockLLM:
-    def chat(self):
-        return self
-
-    def completions(self):
-        return self
+    def __init__(self):
+        # Match OpenAI SDK structure: client.chat.completions.create(...)
+        self.chat = self
+        self.completions = self
 
     def create(self, model, messages, tools, tool_choice, max_tokens):
         user_msgs = [m for m in messages if m.get("role") == "user"]
@@ -86,11 +85,14 @@ def get_llm_client(api_key, api_base):
 
     try:
         from openai import OpenAI
-    except ImportError as e:
-        raise RuntimeError(
-            "Missing dependency 'openai'. Install it to use the LLM client.\n"
-            "You can install it with: pip install openai"
-        ) from e
+    except ImportError:
+        # Fall back to mock LLM when openai is not installed.
+        print(
+            "Warning: openai package not installed; using MockLLM. "
+            "Install it with: pip install openai",
+            file=sys.stderr,
+        )
+        return MockLLM()
 
     return OpenAI(api_key=api_key, base_url=api_base)
 
@@ -105,6 +107,29 @@ def _strip_code_fence(text: str) -> str:
         if len(lines) >= 3:
             return "\n".join(lines[1:-1]).strip()
     return t
+
+
+def _looks_like_planning(text: str) -> bool:
+    if not isinstance(text, str):
+        return False
+    lower = text.lower()
+    planning_phrases = [
+        "i will",
+        "i'll",
+        "let me",
+        "i need to",
+        "i should",
+        "first",
+        "next",
+        "then",
+        "to answer",
+        "to find",
+        "in order to",
+        "i will look",
+        "i will check",
+        "let's",
+    ]
+    return any(phrase in lower for phrase in planning_phrases)
 
 
 def parse_final_response(content: str) -> dict:
@@ -330,9 +355,14 @@ def main():
     system_prompt = """You are a system assistant. Use repository evidence to answer questions by gathering information from documentation, source code, and the running backend.
 
 Tools:
-- `list_files` to discover relevant files and directories in the repo (prefer before read_file when searching documentation).
+- `list_files` to discover relevant files and directories in the repo (use this first when searching the wiki).
 - `read_file` to read file contents (docs or source code).
 - `query_api` to query the live backend API for runtime system state.
+
+IMPORTANT:
+- Do NOT narrate your process (no 'I need to check', 'let me look', 'I will inspect', etc.).
+- Do NOT describe tool usage or planning steps in the final output.
+- Use tools silently and only return final answers once you have evidence.
 
 When you have enough information, respond in strict JSON with these keys:
 - `answer`: string (required)
@@ -343,8 +373,8 @@ Always produce valid JSON and nothing else on stdout. Never include explanatory 
 Do not hallucinate; only answer based on tools and repo evidence."""
 
     messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": question}
+        {"role": "system", "content": system_prompt, "tool_calls": []},
+        {"role": "user", "content": question, "tool_calls": []}
     ]
 
     tool_calls = []
@@ -360,13 +390,18 @@ Do not hallucinate; only answer based on tools and repo evidence."""
                 max_tokens=1000
             )
 
-            message = getattr(response.choices[0], 'message', None)
-            if message is None:
+            message_obj = getattr(response.choices[0], 'message', None)
+            if message_obj is None:
                 break
 
+            message = {
+                "role": getattr(message_obj, 'role', None) or 'assistant',
+                "content": getattr(message_obj, 'content', None),
+                "tool_calls": getattr(message_obj, 'tool_calls', []),
+            }
             messages.append(message)
 
-            tool_calls_in_message = getattr(message, 'tool_calls', []) or []
+            tool_calls_in_message = message.get('tool_calls') or []
             if tool_calls_in_message:
                 for tool_call in tool_calls_in_message:
                     tool_name = tool_call.function.name
@@ -394,17 +429,21 @@ Do not hallucinate; only answer based on tools and repo evidence."""
             # Final answer
             content = getattr(message, 'content', '') or ''
 
-            answer = content
-            source = ""
-            if isinstance(content, str) and "answer:" in content.lower():
-                lines = content.split('\n')
-                for line in lines:
-                    if line.lower().startswith("answer:"):
-                        answer = line.split(":", 1)[1].strip()
-                    elif line.lower().startswith("source:"):
-                        source = line.split(":", 1)[1].strip()
+            # If the assistant produces empty content after tool calls, keep looping.
+            if not content.strip() and tool_calls:
+                continue
 
             parsed = parse_final_response(content)
+
+            # If we get a planning-like response without a source, continue loop.
+            # This prevents the model from returning intermediate planning text as final output.
+            if (
+                not parsed.get("source")
+                and _looks_like_planning(content)
+                and tool_calls
+            ):
+                continue
+
             output = {
                 "answer": parsed.get("answer", ""),
                 "tool_calls": tool_calls,
