@@ -314,7 +314,7 @@ def main():
             "type": "function",
             "function": {
                 "name": "read_file",
-                "description": "Read the contents of a file from the project repository to inspect source code, documentation, or configuration",
+                "description": "Read the contents of a repository file to inspect source code, documentation, configuration, infrastructure, Docker setup, reverse proxy config, or application entrypoints.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -399,6 +399,26 @@ For /analytics/top-learners questions:
 - Query the endpoint first.
 - Then inspect the analytics router source code.
 - Check whether sorting may involve None values, which can cause TypeError / NoneType-related crashes.
+
+For questions about request flow, request lifecycle, Docker architecture, HTTP journey, or how a request travels through the system:
+- Read all relevant infrastructure and app entry files before answering.
+- At minimum inspect:
+  - docker-compose.yml
+  - Caddyfile
+  - the backend Dockerfile
+  - the main backend entrypoint file
+- Trace the request step by step from the browser to the reverse proxy, then to the backend app, then through authentication/dependencies, then into the router/handler, then through the ORM/database layer to PostgreSQL, and then back through the same layers to the browser.
+- Be explicit about each hop.
+- For strong answers, include at least these stages when supported by the code:
+  1. browser/client
+  2. Caddy reverse proxy
+  3. FastAPI application
+  4. authentication or request dependency handling
+  5. router/endpoint handler
+  6. ORM / database session / query layer
+  7. PostgreSQL
+  8. response back through FastAPI and Caddy to the browser
+- Do not give a vague summary; provide the full path in order.
 
 For API router questions specifically:
 - Inspect the backend routers directory using `list_files`.
