@@ -220,30 +220,33 @@ def list_files(path):
         return f"Error listing directory: {e}"
 
 
-def query_api(method, path, body=None):
+def query_api(method, path, body=None, include_auth=True):
     """Query the backend API for live system information."""
     if '..' in path:
         return "Error: Path traversal not allowed"
 
     base_url = os.getenv('AGENT_API_BASE_URL', 'http://localhost:42002')
+
     # Allow mock mode for testing
     if base_url.lower() == 'mock':
-        # Return a stable mock response based on path
+        if not include_auth:
+            return json.dumps({"status_code": 401, "body": {"detail": "Unauthorized"}})
         if 'items' in path:
             return json.dumps({"status_code": 200, "body": {"count": 42}})
         return json.dumps({"status_code": 200, "body": {"message": "mock response"}})
-
-    api_key = os.getenv('LMS_API_KEY')
-    if not api_key:
-        return "Error: Missing LMS_API_KEY"
 
     # Build URL safely
     url = base_url.rstrip('/') + '/' + path.lstrip('/')
 
     headers = {
-        'Authorization': f"Bearer {api_key}",
         'Content-Type': 'application/json'
     }
+
+    if include_auth:
+        api_key = os.getenv('LMS_API_KEY')
+        if not api_key:
+            return "Error: Missing LMS_API_KEY"
+        headers['Authorization'] = f"Bearer {api_key}"
 
     try:
         timeout = 10.0
@@ -278,7 +281,8 @@ def execute_tool(tool_name, args):
         return query_api(
             args.get('method', 'GET'),
             args.get('path', ''),
-            args.get('body')
+            args.get('body'),
+            args.get('include_auth', True)
         )
     else:
         return f"Error: Unknown tool {tool_name}"
@@ -338,13 +342,17 @@ def main():
             "type": "function",
             "function": {
                 "name": "query_api",
-                "description": "Call the backend API to retrieve live system information",
+                "description": "Call the backend API to retrieve live system information. Can make authenticated or unauthenticated requests.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "method": {"type": "string", "description": "HTTP method (GET, POST, etc.)"},
                         "path": {"type": "string", "description": "API path (e.g. /items/)"},
-                        "body": {"type": "string", "description": "Optional JSON request body"}
+                        "body": {"type": "string", "description": "Optional JSON request body"},
+                        "include_auth": {
+                            "type": "boolean",
+                            "description": "Whether to include the LMS API key authentication header. Use false when checking unauthenticated behavior."
+                        }
                     },
                     "required": ["method", "path"]
                 }
@@ -369,6 +377,10 @@ For questions about modules, routers, files, components, or backend structure:
 - First use `list_files` on the relevant directory to discover what exists.
 - Then use `read_file` on the relevant files to gather details.
 - Only then provide the final answer based on the evidence.
+
+For questions about authentication, authorization, missing headers, or behavior without authentication:
+- Use `query_api` with `include_auth=false` to test the unauthenticated request.
+- Report the actual returned HTTP status code.
 
 For API router questions specifically:
 - Inspect the backend routers directory using `list_files`.
