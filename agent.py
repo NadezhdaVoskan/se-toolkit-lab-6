@@ -291,7 +291,8 @@ def main():
     question = sys.argv[1]
 
     # Load environment variables
-    load_dotenv('.env.agent.secret')
+    load_dotenv(".env.agent.secret")
+    load_dotenv(".env.docker.secret")
 
     api_key = os.getenv('LLM_API_KEY')
     api_base = os.getenv('LLM_API_BASE')
@@ -343,7 +344,7 @@ def main():
                     "properties": {
                         "method": {"type": "string", "description": "HTTP method (GET, POST, etc.)"},
                         "path": {"type": "string", "description": "API path (e.g. /items/)"},
-                        "body": {"type": "string", "description": "JSON request body", "nullable": True}
+                        "body": {"type": "string", "description": "Optional JSON request body"}
                     },
                     "required": ["method", "path"]
                 }
@@ -373,9 +374,9 @@ Always produce valid JSON and nothing else on stdout. Never include explanatory 
 Do not hallucinate; only answer based on tools and repo evidence."""
 
     messages = [
-        {"role": "system", "content": system_prompt, "tool_calls": []},
-        {"role": "user", "content": question, "tool_calls": []}
-    ]
+    {"role": "system", "content": system_prompt},
+    {"role": "user", "content": question},
+]
 
     tool_calls = []
     max_calls = 10
@@ -394,12 +395,20 @@ Do not hallucinate; only answer based on tools and repo evidence."""
             if message_obj is None:
                 break
 
-            message = {
-                "role": getattr(message_obj, 'role', None) or 'assistant',
-                "content": getattr(message_obj, 'content', None),
-                "tool_calls": getattr(message_obj, 'tool_calls', []),
+            assistant_role = getattr(message_obj, "role", None) or "assistant"
+            assistant_content = getattr(message_obj, "content", None) or ""
+            assistant_tool_calls = getattr(message_obj, "tool_calls", None) or []
+
+            assistant_message = {
+                "role": assistant_role,
+                "content": assistant_content,
             }
-            messages.append(message)
+
+            if assistant_tool_calls:
+                assistant_message["tool_calls"] = assistant_tool_calls
+
+            messages.append(assistant_message)
+            
 
             tool_calls_in_message = message.get('tool_calls') or []
             if tool_calls_in_message:
@@ -419,15 +428,16 @@ Do not hallucinate; only answer based on tools and repo evidence."""
                         "result": result
                     })
 
+                    tool_call_id = getattr(tool_call, "id", None)
                     messages.append({
                         "role": "tool",
-                        "tool_call_id": getattr(tool_call, 'id', None),
-                        "content": result
+                        "tool_call_id": tool_call_id,
+                        "content": str(result),
                     })
                 continue
 
             # Final answer
-            content = getattr(message, 'content', '') or ''
+            content = assistant_content or ""
 
             # If the assistant produces empty content after tool calls, keep looping.
             if not content.strip() and tool_calls:
