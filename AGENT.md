@@ -1,5 +1,9 @@
 # Agent Architecture
 
+## Workflow note
+
+This PR ensures the task follows the required Git workflow.
+
 ## Overview
 
 The agent is a command-line tool that calls an LLM to answer questions and returns structured JSON responses.

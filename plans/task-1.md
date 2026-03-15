@@ -32,3 +32,7 @@
 
 - Manual: Run `uv run agent.py "test question"` and verify JSON output
 - Automated: Subprocess test checking JSON structure
+
+## Workflow note
+
+This PR ensures the task follows the required Git workflow.
