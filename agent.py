@@ -342,7 +342,7 @@ def main():
             "type": "function",
             "function": {
                 "name": "query_api",
-                "description": "Call the backend API to retrieve live system information. Can make authenticated or unauthenticated requests.",
+                "description": "Call the backend API to retrieve live system information. Use this for runtime data, status codes, API errors, and reproducing failures. The path may include query strings, for example /analytics/completion-rate?lab=lab-99. Can make authenticated or unauthenticated requests.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -381,6 +381,24 @@ For questions about modules, routers, files, components, or backend structure:
 For questions about authentication, authorization, missing headers, or behavior without authentication:
 - Use `query_api` with `include_auth=false` to test the unauthenticated request.
 - Report the actual returned HTTP status code.
+
+For questions about API errors, crashes, bugs, exceptions, or failing analytics endpoints:
+- First use `query_api` on the exact endpoint mentioned in the question, including query parameters.
+- Inspect the returned status code and response body carefully.
+- Then use `read_file` on the relevant backend router/source file to diagnose the root cause.
+- For analytics endpoints, inspect the analytics router source code.
+- Look specifically for risky operations such as division, division by zero, sorting values that may be None, and other None-unsafe logic.
+- Do not guess the bug from the endpoint name alone; reproduce the failure first, then inspect the code.
+
+For /analytics/completion-rate questions:
+- Query the endpoint exactly as written, for example `/analytics/completion-rate?lab=lab-99`.
+- If the lab has no data, check whether the code divides by the number of rows/results without guarding against zero.
+- If so, report the bug as division by zero / ZeroDivisionError.
+
+For /analytics/top-learners questions:
+- Query the endpoint first.
+- Then inspect the analytics router source code.
+- Check whether sorting may involve None values, which can cause TypeError / NoneType-related crashes.
 
 For API router questions specifically:
 - Inspect the backend routers directory using `list_files`.
