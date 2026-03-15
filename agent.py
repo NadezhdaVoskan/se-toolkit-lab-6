@@ -214,7 +214,7 @@ def list_files(path):
         return f"Error: Directory {path} does not exist"
 
     try:
-        entries = os.listdir(full_path)
+        entries = sorted(os.listdir(full_path))
         return '\n'.join(entries)
     except Exception as e:
         return f"Error listing directory: {e}"
@@ -426,6 +426,13 @@ For API router questions specifically:
 - Read each file to determine the domain it handles.
 - Do not answer "not found" unless you have actually inspected the relevant directories.
 
+For wiki questions about VM access, SSH, connecting to the VM, SSH keys, or SSH setup:
+- First use `list_files` on `wiki`.
+- Then read the wiki file that is most relevant to VMs or SSH.
+- Base the answer on that file, not on general knowledge.
+- Include the file path in `source`.
+- Mention the key SSH steps clearly, such as generating or using an SSH key, connecting with `ssh`, and using the VM host/user details from the wiki.
+
 When you have enough information, respond in strict JSON with these keys:
 - `answer`: string (required)
 - `source`: optional string (e.g., wiki/git-workflow.md#resolving-merge-conflicts or backend/app/main.py)
@@ -523,13 +530,29 @@ Do not hallucinate; only answer based on tools and repo evidence."""
             # If the model did not provide a source but we have file tool calls,
             # infer the most likely source path.
             if not parsed.get("source"):
-                for call in tool_calls:
-                    if call.get("tool") in ("read_file", "list_files"):
+                # Prefer the last read_file path, because it is the strongest evidence.
+                source_path = None
+
+                for call in reversed(tool_calls):
+                    if call.get("tool") == "read_file":
                         args = call.get("args") or {}
                         path = args.get("path")
                         if isinstance(path, str) and path:
-                            output["source"] = path
+                            source_path = path
                             break
+
+                # Fall back to list_files only if no read_file was used.
+                if not source_path:
+                    for call in reversed(tool_calls):
+                        if call.get("tool") == "list_files":
+                            args = call.get("args") or {}
+                            path = args.get("path")
+                            if isinstance(path, str) and path:
+                                source_path = path
+                                break
+
+                if source_path:
+                    output["source"] = source_path
             else:
                 output["source"] = parsed["source"]
 
