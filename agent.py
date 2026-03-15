@@ -372,6 +372,7 @@ IMPORTANT:
 - Do NOT narrate your process (no 'I need to check', 'let me look', 'I will inspect', etc.).
 - Do NOT describe tool usage or planning steps in the final output.
 - Use tools silently and only return final answers once you have evidence.
+- Never return a planning message as the final answer; if more evidence is needed, call a tool instead.
 
 For questions about modules, routers, files, components, or backend structure:
 - First use `list_files` on the relevant directory to discover what exists.
@@ -432,6 +433,20 @@ For wiki questions about VM access, SSH, connecting to the VM, SSH keys, or SSH 
 - Base the answer on that file, not on general knowledge.
 - Include the file path in `source`.
 - Mention the key SSH steps clearly, such as generating or using an SSH key, connecting with `ssh`, and using the VM host/user details from the wiki.
+
+For questions about the ETL pipeline, idempotency, duplicate loads, or loading the same data twice:
+- Use `read_file` to inspect the ETL pipeline source file directly.
+- Read the load logic carefully.
+- Look specifically for duplicate checks such as `external_id`, existence checks, upsert-like behavior, or skipping already-seen records.
+- Do not return a planning message.
+- Explain exactly what happens if the same data is loaded twice.
+- If duplicates are skipped because existing records are detected, state that clearly.
+
+For ETL idempotency questions specifically:
+- Inspect the ETL load function.
+- Look for a check on `external_id` or equivalent unique identifiers before inserting rows.
+- If the code checks whether a record already exists and skips insertion, explain that this is what makes the load idempotent.
+- Report that loading the same data twice does not create duplicates because already-existing records are skipped.
 
 When you have enough information, respond in strict JSON with these keys:
 - `answer`: string (required)
