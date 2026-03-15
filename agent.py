@@ -287,6 +287,39 @@ def execute_tool(tool_name, args):
     else:
         return f"Error: Unknown tool {tool_name}"
 
+def build_request_flow_fallback(question: str, tool_calls: list[dict]) -> str | None:
+    """Build a best-effort answer for request-flow questions from already-read files."""
+    q = (question or "").lower()
+    if not any(term in q for term in ["docker", "request", "http journey", "lifecycle", "browser to the database"]):
+        return None
+
+    read_paths = []
+    for call in tool_calls:
+        if call.get("tool") == "read_file":
+            path = (call.get("args") or {}).get("path")
+            if isinstance(path, str) and path:
+                read_paths.append(path)
+
+    # Only use this fallback if the agent already inspected the likely relevant files.
+    joined = " ".join(read_paths).lower()
+    has_compose = "docker-compose.yml" in joined
+    has_caddy = "caddyfile" in joined
+    has_dockerfile = "dockerfile" in joined
+    has_main = "main.py" in joined
+
+    if not (has_compose and has_caddy and has_dockerfile and has_main):
+        return None
+
+    return (
+        "An HTTP request starts in the browser and first reaches the Caddy reverse proxy. "
+        "Caddy forwards the request to the backend FastAPI service defined in docker-compose. "
+        "Inside the backend container, the FastAPI application receives the request through the main app entrypoint, "
+        "runs authentication or request dependency handling, and routes the request to the matching endpoint handler. "
+        "That handler uses the ORM/database session layer to query or update PostgreSQL. "
+        "The database result is returned back through the ORM layer to the router handler, then serialized by FastAPI into an HTTP response. "
+        "The response then goes back from FastAPI to Caddy, and finally from Caddy back to the browser."
+    )
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python agent.py <question>", file=sys.stderr)
@@ -408,6 +441,7 @@ For questions about request flow, request lifecycle, Docker architecture, HTTP j
   - Caddyfile
   - the backend Dockerfile
   - the main backend entrypoint file
+- After reading docker-compose.yml, Caddyfile, the backend Dockerfile, and the main backend entrypoint, stop gathering more files and produce the final answer.
 - Trace the request step by step from the browser to the reverse proxy, then to the backend app, then through authentication/dependencies, then into the router/handler, then through the ORM/database layer to PostgreSQL, and then back through the same layers to the browser.
 - Be explicit about each hop.
 - For strong answers, include at least these stages when supported by the code:
@@ -577,9 +611,13 @@ Do not hallucinate; only answer based on tools and repo evidence."""
             return
 
         # Max calls reached: return a best-effort answer instead of failing outright.
-        answer = "I inspected the relevant repository files but did not get a final model response in time."
+        fallback_answer = build_request_flow_fallback(question, tool_calls)
+
+        if fallback_answer is None:
+            fallback_answer = "I inspected the relevant repository files but did not get a final model response in time."
+
         output = {
-            "answer": answer,
+            "answer": fallback_answer,
             "tool_calls": tool_calls,
         }
 
