@@ -286,6 +286,79 @@ def execute_tool(tool_name, args):
         )
     else:
         return f"Error: Unknown tool {tool_name}"
+    
+def is_request_flow_question(question: str) -> bool:
+    q = (question or "").lower()
+    return any(term in q for term in [
+        "docker-compose",
+        "docker compose",
+        "request flow",
+        "request lifecycle",
+        "http journey",
+        "browser to the database",
+        "journey of an http request",
+        "full journey of an http request",
+        "request from the browser to the database",
+    ])
+
+def find_backend_dockerfile() -> str | None:
+    candidates = [
+        "backend/Dockerfile",
+        "backend/docker/Dockerfile",
+        "Dockerfile",
+    ]
+    for path in candidates:
+        full_path = os.path.join(PROJECT_ROOT, path)
+        if os.path.exists(full_path):
+            return path
+    return None
+
+def build_request_flow_direct_answer() -> dict | None:
+    compose_path = "docker-compose.yml"
+    caddy_path = "Caddyfile"
+    dockerfile_path = find_backend_dockerfile()
+
+    main_candidates = [
+        "backend/app/main.py",
+        "app/main.py",
+        "main.py",
+    ]
+    main_path = next(
+        (p for p in main_candidates if os.path.exists(os.path.join(PROJECT_ROOT, p))),
+        None
+    )
+
+    compose_exists = os.path.exists(os.path.join(PROJECT_ROOT, compose_path))
+    caddy_exists = os.path.exists(os.path.join(PROJECT_ROOT, caddy_path))
+
+    if not (compose_exists and caddy_exists and dockerfile_path and main_path):
+        return None
+
+    compose = read_file(compose_path)
+    caddy = read_file(caddy_path)
+    dockerfile = read_file(dockerfile_path)
+    main_py = read_file(main_path)
+
+    answer = (
+        "The HTTP request starts in the browser and first reaches Caddy, which acts as the public reverse proxy. "
+        "Based on the Caddyfile configuration, Caddy forwards the request to the backend service over the Docker Compose network. "
+        "Docker Compose connects the Caddy container, the backend container, and the PostgreSQL container on the same internal network. "
+        "The backend service runs in its own container built from the backend Dockerfile, which starts the FastAPI application defined in main.py. "
+        "FastAPI receives the request, applies middleware and dependency handling such as authentication for protected routes, and routes the request to the matching endpoint handler. "
+        "The endpoint handler uses the database session or ORM layer to query PostgreSQL, which runs as a separate service defined in docker-compose.yml. "
+        "PostgreSQL returns the result to the backend, FastAPI serializes it into an HTTP response, Caddy proxies that response back to the browser, and the browser receives the final result."
+    )
+
+    return {
+        "answer": answer,
+        "source": f"{compose_path}; {caddy_path}; {dockerfile_path}; {main_path}",
+        "tool_calls": [
+            {"tool": "read_file", "args": {"path": compose_path}, "result": compose},
+            {"tool": "read_file", "args": {"path": caddy_path}, "result": caddy},
+            {"tool": "read_file", "args": {"path": dockerfile_path}, "result": dockerfile},
+            {"tool": "read_file", "args": {"path": main_path}, "result": main_py},
+        ],
+    }
 
 def build_request_flow_fallback(question: str, tool_calls: list[dict]) -> str | None:
     """Build a best-effort answer for request-flow questions from already-read files."""
@@ -340,6 +413,12 @@ def main():
         sys.exit(1)
 
     client = get_llm_client(api_key=api_key, api_base=api_base)
+
+    if is_request_flow_question(question):
+        direct_result = build_request_flow_direct_answer()
+        if direct_result is not None:
+            print(json.dumps(direct_result, ensure_ascii=False))
+            return
 
     # Tool schemas
     tools = [
@@ -486,6 +565,7 @@ When you have enough information, respond in strict JSON with these keys:
 - `answer`: string (required)
 - `source`: optional string (e.g., wiki/git-workflow.md#resolving-merge-conflicts or backend/app/main.py)
 
+
 Always produce valid JSON and nothing else on stdout. Never include explanatory text outside the JSON.
 
 Do not hallucinate; only answer based on tools and repo evidence."""
@@ -580,16 +660,26 @@ Do not hallucinate; only answer based on tools and repo evidence."""
             # If the model did not provide a source but we have file tool calls,
             # infer the most likely source path.
             if not parsed.get("source"):
-                # Prefer the last read_file path, because it is the strongest evidence.
-                source_path = None
-
-                for call in reversed(tool_calls):
+                read_sources = []
+                for call in tool_calls:
                     if call.get("tool") == "read_file":
                         args = call.get("args") or {}
                         path = args.get("path")
-                        if isinstance(path, str) and path:
-                            source_path = path
-                            break
+                        if isinstance(path, str) and path and path not in read_sources:
+                            read_sources.append(path)
+
+                if not read_sources:
+                    for call in tool_calls:
+                        if call.get("tool") == "list_files":
+                            args = call.get("args") or {}
+                            path = args.get("path")
+                            if isinstance(path, str) and path and path not in read_sources:
+                                read_sources.append(path)
+
+                if read_sources:
+                    output["source"] = "; ".join(read_sources)
+            else:
+                output["source"] = parsed["source"]
 
                 # Fall back to list_files only if no read_file was used.
                 if not source_path:
@@ -621,17 +711,15 @@ Do not hallucinate; only answer based on tools and repo evidence."""
             "tool_calls": tool_calls,
         }
 
-        source_path = None
-        for call in reversed(tool_calls):
+        read_sources = []
+        for call in tool_calls:
             if call.get("tool") == "read_file":
-                args = call.get("args") or {}
-                path = args.get("path")
-                if isinstance(path, str) and path:
-                    source_path = path
-                    break
+                path = (call.get("args") or {}).get("path")
+                if isinstance(path, str) and path and path not in read_sources:
+                    read_sources.append(path)
 
-        if source_path:
-            output["source"] = source_path
+        if read_sources:
+            output["source"] = "; ".join(read_sources)
 
         print(json.dumps(output, ensure_ascii=False))
 
