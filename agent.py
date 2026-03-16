@@ -657,8 +657,7 @@ Do not hallucinate; only answer based on tools and repo evidence."""
                 "tool_calls": tool_calls,
             }
 
-            # If the model did not provide a source but we have file tool calls,
-            # infer the most likely source path.
+            # If the model did not provide a source, infer it from tool calls.
             if not parsed.get("source"):
                 read_sources = []
                 for call in tool_calls:
@@ -680,21 +679,6 @@ Do not hallucinate; only answer based on tools and repo evidence."""
                     output["source"] = "; ".join(read_sources)
             else:
                 output["source"] = parsed["source"]
-
-                # Fall back to list_files only if no read_file was used.
-                if not source_path:
-                    for call in reversed(tool_calls):
-                        if call.get("tool") == "list_files":
-                            args = call.get("args") or {}
-                            path = args.get("path")
-                            if isinstance(path, str) and path:
-                                source_path = path
-                                break
-
-                if source_path:
-                    output["source"] = source_path
-                else:
-                    output["source"] = parsed["source"]
 
             # Always output strict JSON only.
             print(json.dumps(output, ensure_ascii=False))
