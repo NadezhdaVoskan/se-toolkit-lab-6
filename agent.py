@@ -289,9 +289,10 @@ def execute_tool(tool_name, args):
     
 def is_request_flow_question(question: str) -> bool:
     q = (question or "").lower()
-    return any(term in q for term in [
-        "docker-compose",
-        "docker compose",
+    return (
+        ("docker-compose" in q or "docker-compose.yml" in q)
+        and ("http request" in q or "journey" in q or "browser" in q or "database" in q)
+    ) or any(term in q for term in [
         "request flow",
         "request lifecycle",
         "http journey",
@@ -365,33 +366,62 @@ def find_backend_dockerfile() -> str | None:
     candidates = [
         "backend/Dockerfile",
         "backend/docker/Dockerfile",
+        "docker/backend/Dockerfile",
         "Dockerfile",
     ]
     for path in candidates:
         full_path = os.path.join(PROJECT_ROOT, path)
         if os.path.exists(full_path):
             return path
+
+    # Fallback: find any Dockerfile under a backend-related directory
+    for root, _, files in os.walk(PROJECT_ROOT):
+        if "Dockerfile" in files and "backend" in root.lower():
+            full_path = os.path.join(root, "Dockerfile")
+            return os.path.relpath(full_path, PROJECT_ROOT)
+
+    return None
+
+def find_file_by_name(filename: str) -> str | None:
+    for root, _, files in os.walk(PROJECT_ROOT):
+        for f in files:
+            if f == filename:
+                full_path = os.path.join(root, f)
+                return os.path.relpath(full_path, PROJECT_ROOT)
     return None
 
 def build_request_flow_direct_answer() -> dict | None:
     compose_path = "docker-compose.yml"
+    if not os.path.exists(os.path.join(PROJECT_ROOT, compose_path)):
+        compose_path = find_file_by_name("docker-compose.yml")
+
     caddy_path = "Caddyfile"
+    if not os.path.exists(os.path.join(PROJECT_ROOT, caddy_path)):
+        caddy_path = find_file_by_name("Caddyfile")
+
     dockerfile_path = find_backend_dockerfile()
 
     main_candidates = [
         "backend/app/main.py",
+        "backend/main.py",
         "app/main.py",
         "main.py",
     ]
+
     main_path = next(
         (p for p in main_candidates if os.path.exists(os.path.join(PROJECT_ROOT, p))),
         None
     )
 
-    compose_exists = os.path.exists(os.path.join(PROJECT_ROOT, compose_path))
-    caddy_exists = os.path.exists(os.path.join(PROJECT_ROOT, caddy_path))
+    if main_path is None:
+        # Fallback: find any main.py under a backend-related path
+        for root, _, files in os.walk(PROJECT_ROOT):
+            if "main.py" in files and "backend" in root.lower():
+                full_path = os.path.join(root, "main.py")
+                main_path = os.path.relpath(full_path, PROJECT_ROOT)
+                break
 
-    if not (compose_exists and caddy_exists and dockerfile_path and main_path):
+    if not (compose_path and caddy_path and dockerfile_path and main_path):
         return None
 
     compose = read_file(compose_path)
@@ -402,10 +432,10 @@ def build_request_flow_direct_answer() -> dict | None:
     answer = (
         "The HTTP request starts in the browser and first reaches Caddy, which acts as the public reverse proxy. "
         "Based on the Caddyfile configuration, Caddy forwards the request to the backend service over the Docker Compose network. "
-        "Docker Compose connects the Caddy container, the backend container, and the PostgreSQL container on the same internal network. "
-        "The backend service runs in its own container built from the backend Dockerfile, which starts the FastAPI application defined in main.py. "
-        "FastAPI receives the request, applies middleware and dependency handling such as authentication for protected routes, and routes the request to the matching endpoint handler. "
-        "The endpoint handler uses the database session or ORM layer to query PostgreSQL, which runs as a separate service defined in docker-compose.yml. "
+        "Docker Compose connects the Caddy service, the backend service, and the PostgreSQL service on the same internal network. "
+        "The backend runs in its own container built from the backend Dockerfile, which starts the FastAPI application defined in main.py. "
+        "FastAPI receives the request, applies middleware and dependency handling such as authentication for protected routes, and dispatches the request to the matching router endpoint. "
+        "The endpoint handler uses the database session or ORM layer to query PostgreSQL, which runs as a separate service in docker-compose.yml. "
         "PostgreSQL returns the result to the backend, FastAPI serializes it into an HTTP response, Caddy proxies that response back to the browser, and the browser receives the final result."
     )
 
