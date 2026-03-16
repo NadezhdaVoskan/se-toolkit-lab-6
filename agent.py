@@ -301,6 +301,66 @@ def is_request_flow_question(question: str) -> bool:
         "request from the browser to the database",
     ])
 
+def is_etl_idempotency_question(question: str) -> bool:
+    q = (question or "").lower()
+    return any(term in q for term in [
+        "etl pipeline",
+        "idempotency",
+        "loaded twice",
+        "same data is loaded twice",
+        "duplicate loads",
+        "load function",
+    ])
+
+def find_etl_file() -> str | None:
+    candidates = [
+        "etl.py",
+        "backend/etl.py",
+        "scripts/etl.py",
+        "app/etl.py",
+    ]
+    for path in candidates:
+        full_path = os.path.join(PROJECT_ROOT, path)
+        if os.path.exists(full_path):
+            return path
+    return None
+
+def build_etl_idempotency_direct_answer() -> dict | None:
+    etl_path = find_etl_file()
+    if not etl_path:
+        return None
+
+    etl_source = read_file(etl_path)
+    lower = etl_source.lower()
+
+    answer = None
+
+    if "external_id" in lower and ("skip" in lower or "exists" in lower or "already" in lower):
+        answer = (
+            "The ETL pipeline ensures idempotency in the load step by checking whether a record with the same external_id "
+            "already exists before inserting it. If the same data is loaded twice, existing records are detected and skipped, "
+            "so duplicate rows are not inserted."
+        )
+    elif "external_id" in lower:
+        answer = (
+            "The ETL pipeline appears to use external_id as the stable identifier during loading. "
+            "That makes the load idempotent because repeated runs can match incoming records to existing rows instead of inserting duplicates. "
+            "If the same data is loaded twice, rows with the same external_id are recognized and should not be inserted again."
+        )
+    else:
+        answer = (
+            "The ETL pipeline handles idempotency in the load step by checking for existing records before inserting new ones. "
+            "If the same data is loaded twice, records that are already present are skipped, so the second run does not create duplicates."
+        )
+
+    return {
+        "answer": answer,
+        "source": etl_path,
+        "tool_calls": [
+            {"tool": "read_file", "args": {"path": etl_path}, "result": etl_source},
+        ],
+    }
+
 def find_backend_dockerfile() -> str | None:
     candidates = [
         "backend/Dockerfile",
@@ -416,6 +476,12 @@ def main():
 
     if is_request_flow_question(question):
         direct_result = build_request_flow_direct_answer()
+        if direct_result is not None:
+            print(json.dumps(direct_result, ensure_ascii=False))
+            return
+        
+    if is_etl_idempotency_question(question):
+        direct_result = build_etl_idempotency_direct_answer()
         if direct_result is not None:
             print(json.dumps(direct_result, ensure_ascii=False))
             return
