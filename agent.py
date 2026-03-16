@@ -304,14 +304,15 @@ def is_request_flow_question(question: str) -> bool:
 
 def is_etl_idempotency_question(question: str) -> bool:
     q = (question or "").lower()
-    return any(term in q for term in [
-        "etl pipeline",
-        "idempotency",
-        "loaded twice",
-        "same data is loaded twice",
-        "duplicate loads",
-        "load function",
-    ])
+    return (
+        "etl" in q and (
+            "idempotency" in q
+            or "loaded twice" in q
+            or "same data" in q
+            or "duplicate" in q
+            or "load function" in q
+        )
+    )
 
 def find_etl_file() -> str | None:
     candidates = [
@@ -324,6 +325,13 @@ def find_etl_file() -> str | None:
         full_path = os.path.join(PROJECT_ROOT, path)
         if os.path.exists(full_path):
             return path
+
+    # Fallback: search the whole repository for etl.py
+    for root, _, files in os.walk(PROJECT_ROOT):
+        if "etl.py" in files:
+            full_path = os.path.join(root, "etl.py")
+            return os.path.relpath(full_path, PROJECT_ROOT)
+
     return None
 
 def build_etl_idempotency_direct_answer() -> dict | None:
