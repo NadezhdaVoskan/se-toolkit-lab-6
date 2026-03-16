@@ -576,7 +576,7 @@ Do not hallucinate; only answer based on tools and repo evidence."""
 ]
 
     tool_calls = []
-    max_calls = 16
+    max_calls = 10
 
     try:
         for _ in range(max_calls):
