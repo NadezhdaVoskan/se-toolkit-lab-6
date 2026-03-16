@@ -693,8 +693,8 @@ Do not hallucinate; only answer based on tools and repo evidence."""
 
                 if source_path:
                     output["source"] = source_path
-            else:
-                output["source"] = parsed["source"]
+                else:
+                    output["source"] = parsed["source"]
 
             # Always output strict JSON only.
             print(json.dumps(output, ensure_ascii=False))
